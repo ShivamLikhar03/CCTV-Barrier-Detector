@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CCTV Obstruction Monitor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            padding-top: 20px;
+            background-color: #f5f5f5;
+        }
+        .video-container {
+            position: relative;
+            margin: 0 auto;
+            max-width: 100%;
+            overflow: hidden;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .video-feed {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .status-container {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 10px;
+            background-color: white;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .status-normal {
+            color: green;
+            font-weight: bold;
+        }
+        .status-obstructed {
+            color: red;
+            font-weight: bold;
+            animation: blink 1s infinite;
+        }
+        .alarm-active {
+            background-color: #ffe6e6;
+            animation: pulse 1.5s infinite;
+        }
+        .connection-form {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 10px;
+            background-color: white;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .log-container {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 10px;
+            background-color: white;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            padding: 5px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        @keyframes pulse {
+            0% { background-color: #ffe6e6; }
+            50% { background-color: #ffcccc; }
+            100% { background-color: #ffe6e6; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">CCTV Obstruction Monitor</h1>
+        
+        <div class="row">
+            <div class="col-lg-8">
+                <div class="video-container">
+                    <img src="{{ url_for('video_feed') }}" class="video-feed" alt="Camera feed">
+                </div>
+                
+                <div class="status-container" id="status-container">
+                    <h3>Status: <span id="status-text" class="status-normal">Not Connected</span></h3>
+                    <p id="obstruction-time" style="display: none">Obstruction Time: <span id="elapsed-time">0</span> seconds</p>
+                    <p>Settings: Darkness Threshold <span id="threshold-value">25</span>, Alarm Duration <span id="duration-value">20</span> seconds</p>
+                </div>
+            </div>
+            
+            <div class="col-lg-4">
+                <div class="connection-form">
+                    <h3>Connect to Camera</h3>
+                    <form id="camera-form">
+                        <div class="mb-3">
+                            <label for="camera-ip" class="form-label">Camera IP:Port</label>
+                            <input type="text" class="form-control" id="camera-ip" name="camera_ip" value="192.168.1.6:8080" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="threshold" class="form-label">Darkness Threshold (0-255)</label>
+                            <input type="number" class="form-control" id="threshold" name="threshold" value="25" min="0" max="255" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="duration" class="form-label">Alarm Duration (seconds)</label>
+                            <input type="number" class="form-control" id="duration" name="duration" value="20" min="1" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">Connect</button>
+                    </form>
+                    <div class="mt-3" id="connection-message"></div>
+                </div>
+                
+                <div class="log-container">
+                    <h3>Event Log</h3>
+                    <div id="log-entries"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Audio element for alarm -->
+    <audio id="alarm-sound" loop>
+        <source src="{{ url_for('static', filename='alert.wav') }}" type="audio/wav">
+        Your browser does not support the audio element.
+    </audio>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const cameraForm = document.getElementById('camera-form');
+            const connectionMessage = document.getElementById('connection-message');
+            const statusText = document.getElementById('status-text');
+            const statusContainer = document.getElementById('status-container');
+            const obstructionTime = document.getElementById('obstruction-time');
+            const elapsedTime = document.getElementById('elapsed-time');
+            const thresholdValue = document.getElementById('threshold-value');
+            const durationValue = document.getElementById('duration-value');
+            const logEntriesContainer = document.getElementById('log-entries');
+            const alarmSound = document.getElementById('alarm-sound');
+            
+            let connected = false;
+            let statusInterval = null;
+            let logInterval = null;
+            
+            // Connect to camera
+            cameraForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const formData = new FormData(cameraForm);
+                connectionMessage.innerHTML = '<div class="alert alert-info">Connecting...</div>';
+                
+                fetch('/connect', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        connected = true;
+                        connectionMessage.innerHTML = `<div class="alert alert-success">${data.message}</div>`;
+                        thresholdValue.textContent = data.threshold;
+                        durationValue.textContent = data.duration;
+                        
+                        // Start polling for status
+                        if (statusInterval) clearInterval(statusInterval);
+                        statusInterval = setInterval(updateStatus, 1000);
+                        
+                        // Start polling for logs
+                        if (logInterval) clearInterval(logInterval);
+                        logInterval = setInterval(updateLogs, 5000);
+                    } else {
+                        connectionMessage.innerHTML = `<div class="alert alert-danger">${data.message}</div>`;
+                    }
+                })
+                .catch(error => {
+                    connectionMessage.innerHTML = `<div class="alert alert-danger">Error connecting: ${error}</div>`;
+                });
+            });
+            
+            // Update status
+            function updateStatus() {
+                if (!connected) return;
+                
+                fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    // Update connection status
+                    if (data.connected) {
+                        if (data.obstruction_detected) {
+                            statusText.textContent = 'OBSTRUCTED';
+                            statusText.className = 'status-obstructed';
+                            obstructionTime.style.display = 'block';
+                            elapsedTime.textContent = data.elapsed_time.toFixed(1);
+                        } else {
+                            statusText.textContent = 'NORMAL';
+                            statusText.className = 'status-normal';
+                            obstructionTime.style.display = 'none';
+                        }
+                        
+                        // Handle alarm
+                        if (data.alarm_active) {
+                            statusContainer.classList.add('alarm-active');
+                            if (alarmSound.paused) {
+                                alarmSound.play().catch(e => console.error('Error playing alarm:', e));
+                            }
+                        } else {
+                            statusContainer.classList.remove('alarm-active');
+                            alarmSound.pause();
+                            alarmSound.currentTime = 0;
+                        }
+                    } else {
+                        statusText.textContent = 'Not Connected';
+                        statusText.className = 'status-normal';
+                        obstructionTime.style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching status:', error);
+                });
+            }
+            
+            // Update logs
+            function updateLogs() {
+                if (!connected) return;
+                
+                fetch('/logs')
+                .then(response => response.json())
+                .then(data => {
+                    logEntriesContainer.innerHTML = '';
+                    data.logs.forEach(log => {
+                        const logEntry = document.createElement('div');
+                        logEntry.className = 'log-entry';
+                        logEntry.textContent = log;
+                        if (log.includes('Alarm triggered')) {
+                            logEntry.style.color = 'red';
+                            logEntry.style.fontWeight = 'bold';
+                        } else if (log.includes('Obstruction detected')) {
+                            logEntry.style.color = 'orange';
+                        } else if (log.includes('Obstruction cleared')) {
+                            logEntry.style.color = 'green';
+                        }
+                        logEntriesContainer.appendChild(logEntry);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching logs:', error);
+                });
+            }
+        });
+    </script>
+</body>
+</html> 
