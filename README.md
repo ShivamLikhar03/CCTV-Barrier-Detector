@@ -64,3 +64,5 @@ python cctv_monitor.py --ip 192.168.1.100:8080 --threshold 30 --duration 15
 ## Logs
 
 Obstruction events are logged to `obstruction_log.txt` with timestamps. 
+
+<img width="1469" alt="image" src="https://github.com/user-attachments/assets/98734e86-8394-45b0-ac29-6bdff4814fe3" />
